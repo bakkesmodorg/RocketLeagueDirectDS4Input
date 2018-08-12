@@ -31,7 +31,7 @@ Use the painter to get values that fit you
 Inner deadzone for controller (useful for when your stick is slightly stuck to one side
 Example: 10% inner deadzone all inputs 123 +- 12 are ignored, so if you want 10% deadzone, set LS_INNER_DEADZONE to 12.
 */
-#define LS_INNER_DEADZONE 10
+#define LS_INNER_DEADZONE 10 //10 is ~8.3%
 
 /*
 Outer deadzone
@@ -39,9 +39,9 @@ Outer deadzone
 #define LS_OUTER_DEADZONE 20
 
 /*
-Left stick sensitivity multiplier, if set to 1 it won't be used during compilation
+Left stick sensitivity multiplier, if not defined will use 1
 */
-#define LS_MULTIPLIER 1
+#define LS_MULTIPLIER 1.4f
 
 /*
 Throttle deadzones
@@ -64,7 +64,13 @@ If false it will block the input reading thread and wait until a new controller 
 Calculations
 */
 #define SCALE_BYTE(val, minval, maxval, innerdeadzone) (abs(val - 123) < innerdeadzone ? 0.f : 2.f * (val - minval) / (maxval - minval) - 1.f)
+
+#ifndef LS_MULTIPLIER
 #define SCALE_LEFTSTICK(val) SCALE_BYTE(val, LS_OUTER_DEADZONE, 256-LS_OUTER_DEADZONE, LS_INNER_DEADZONE)
+#else
+#define SCALE_LEFTSTICK(val) (SCALE_BYTE(val, LS_OUTER_DEADZONE, 256-LS_OUTER_DEADZONE, LS_INNER_DEADZONE) * LS_MULTIPLIER)
+#endif
+
 #define SCALE_R2(val) SCALE_BYTE(val, R2_OUTER_DEADZONE, 256-R2_OUTER_DEADZONE, R2_INNER_DEADZONE)
 #define SCALE_L2(val) SCALE_BYTE(val, L2_OUTER_DEADZONE, 256-L2_OUTER_DEADZONE, L2_INNER_DEADZONE)
 
