@@ -47,7 +47,6 @@ void DirectInputPlugin::InputTick(PlayerControllerWrapper cw, void * params, str
 {
 	if (!handle)
 		return;
-	
 	ControllerInput input = cw.GetVehicleInput();
 #ifdef USE_BAKKESMOD_CONTROLSCHEME
 	input.Steer = SCALE_LEFTSTICK(lastInput.leftx);
@@ -59,7 +58,7 @@ void DirectInputPlugin::InputTick(PlayerControllerWrapper cw, void * params, str
 
 	cw.SetVehicleInput(input);
 	cw.ToggleJump(BUTTON_CROSS_PRESSED(lastInput.buttons));
-	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons) | BUTTON_R1_PRESSED(lastInput.buttons));
+	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons));
 	cw.ToggleBoost(BUTTON_CIRCLE_PRESSED(lastInput.buttons));
 #elif defined(USE_DEFAULT_CONTROLSCHEME)
 	input.Throttle = SCALE_R2(lastInput.r2) - SCALE_L2(lastInput.l2);

@@ -26,7 +26,7 @@ Uncomment one of the control schemes or add your own
 The amount of time (in ms) to sleep between controller readings, lower value = more readings but might impact performance.
 There is probably a minimum threshold since the DS4 controller has a maximum polling rate, but cba looking it up now
 */
-#define READ_THREAD_SLEEP_INTERVAL 0.5
+#define READ_THREAD_SLEEP_INTERVAL 0.1
 
 /*
 Deadzone configuration in bytes (Controller range from 0-256 where 0 is fully to the left, 256 fully to the right)
@@ -42,32 +42,36 @@ Example: 10% inner deadzone all inputs 123 +- 12 are ignored, so if you want 10%
 /*
 Outer deadzone
 */
-#define LS_OUTER_DEADZONE 20
+#define LS_OUTER_DEADZONE 2
 
 /*
 Left stick sensitivity multiplier, if not defined will use 1
 */
-#define LS_MULTIPLIER 1.4f
+#define LS_MULTIPLIER 1.3f
 
 /*
 Throttle deadzones
 */
 #define R2_INNER_DEADZONE 5
-#define R2_OUTER_DEADZONE 50
+#define R2_OUTER_DEADZONE 20
 
 /*
 Reverse deadzones
 */
 #define L2_INNER_DEADZONE 5
-#define L2_OUTER_DEADZONE 50
+#define L2_OUTER_DEADZONE 20
 
 /*
 If false it will block the input reading thread and wait until a new controller state is received from ReadFile. (Recommended to keep true)
 */
-#define READ_NONBLOCKING true
+#define READ_NONBLOCKING false
 
 /*
 Calculations
+*/
+
+/*
+Scales 0-256 from -1 to 1
 */
 #define SCALE_BYTE(val, minval, maxval, innerdeadzone) (abs(val - 123) < innerdeadzone ? 0.f : 2.f * (val - minval) / (maxval - minval) - 1.f)
 
@@ -77,8 +81,11 @@ Calculations
 #define SCALE_LEFTSTICK(val) (SCALE_BYTE(val, LS_OUTER_DEADZONE, 256-LS_OUTER_DEADZONE, LS_INNER_DEADZONE) * LS_MULTIPLIER)
 #endif
 
-#define SCALE_R2(val) SCALE_BYTE(val, R2_OUTER_DEADZONE, 256-R2_OUTER_DEADZONE, R2_INNER_DEADZONE)
-#define SCALE_L2(val) SCALE_BYTE(val, L2_OUTER_DEADZONE, 256-L2_OUTER_DEADZONE, L2_INNER_DEADZONE)
+/*Scales 0-256 from 0 to 1 */
+#define SCALE_BYTE_SINGLE(val, minval, maxval, innerdeadzone) (val < innerdeadzone ? 0.f : (val - minval) / (maxval - minval))
+
+#define SCALE_R2(val) SCALE_BYTE_SINGLE(val, R2_OUTER_DEADZONE.f, 256-R2_OUTER_DEADZONE, R2_INNER_DEADZONE.f)
+#define SCALE_L2(val) SCALE_BYTE_SINGLE(val, L2_OUTER_DEADZONE.f, 256-L2_OUTER_DEADZONE, L2_INNER_DEADZONE.f)
 
 /*
 Constants
