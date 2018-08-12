@@ -16,6 +16,12 @@ Right now, it does not yet block Rocket League from reading the input, so it is 
 Configuration settings
 */
 
+/*
+Uncomment one of the control schemes or add your own
+*/
+#define USE_BAKKESMOD_CONTROLSCHEME
+//#define USE_DEFAULT_CONTROLSCHEME
+
 /* 
 The amount of time (in ms) to sleep between controller readings, lower value = more readings but might impact performance.
 There is probably a minimum threshold since the DS4 controller has a maximum polling rate, but cba looking it up now
