@@ -22,17 +22,15 @@ void read_inputs()
 		ResetEvent(overlapped.hEvent);
 		if (handle) {
 			lastResult = hid_read(handle, (u8*)&lastInput, 64);
-			//if (lastResult == -1)
-			//{
-			//	//Error = GetLastError();
-			//}
 		}
 		Sleep(READ_THREAD_SLEEP_INTERVAL);
 	}
 }
 void DirectInputPlugin::onLoad()
 {
-	gameWrapper->HookEventWithCallerPost<PlayerControllerWrapper>("Function TAGame.PlayerController_TA.PlayerMove", bind(&DirectInputPlugin::InputTick, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+	cvarManager->registerNotifier("hid_list", std::bind(&DirectInputPlugin::OnConsoleCommand, this, std::placeholders::_1), "Lists all currently connected HIDs", PERMISSION_ALL);
+	gameWrapper->HookEventWithCallerPost<PlayerControllerWrapper>("Function TAGame.PlayerController_TA.PlayerMove", 
+		bind(&DirectInputPlugin::InputTick, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 	connect_to_ds4();
 }
 
@@ -40,7 +38,6 @@ void DirectInputPlugin::onUnload()
 {
 	disconnect_ds4();
 }
-
 
 
 void DirectInputPlugin::InputTick(PlayerControllerWrapper cw, void * params, string funcName)
@@ -73,14 +70,14 @@ void DirectInputPlugin::InputTick(PlayerControllerWrapper cw, void * params, str
 
 	cw.SetVehicleInput(input);
 	cw.ToggleJump(BUTTON_CROSS_PRESSED(lastInput.buttons));
-	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons) | BUTTON_R1_PRESSED(lastInput.buttons));
+	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons));
 	cw.ToggleBoost(BUTTON_CIRCLE_PRESSED(lastInput.buttons));
 #endif
 }
 
 void DirectInputPlugin::connect_to_ds4()
 {
-	if (!(handle = hid_open(0x54c, 0x09cc, NULL))) {//0x5c4
+	if (!(handle = hid_open(VENDOR_ID, PRODUCT_ID, NULL))) {//0x5c4
 		cvarManager->log("Unable to connect to controller");
 		hid_exit();
 		return;
@@ -100,4 +97,45 @@ void DirectInputPlugin::disconnect_ds4()
 		return;
 	hid_close(handle);
 	hid_exit();
+}
+
+
+std::string string_format(const std::string fmt_str, ...) {
+	int final_n, n = ((int)fmt_str.size()) * 2; /* Reserve two times as much as the length of the fmt_str */
+	std::unique_ptr<char[]> formatted;
+	va_list ap;
+	while (1) {
+		formatted.reset(new char[n]); /* Wrap the plain char array into the unique_ptr */
+		strcpy(&formatted[0], fmt_str.c_str());
+		va_start(ap, fmt_str);
+		final_n = vsnprintf(&formatted[0], n, fmt_str.c_str(), ap);
+		va_end(ap);
+		if (final_n < 0 || final_n >= n)
+			n += abs(final_n - n + 1);
+		else
+			break;
+	}
+	return std::string(formatted.get());
+}
+
+void DirectInputPlugin::OnConsoleCommand(std::vector<std::string> parameters)
+{
+	if (parameters.at(0).compare("hid_init") == 0)
+	{
+				int res = hid_init();
+				struct hid_device_info *devs, *cur_dev;
+		
+				devs = hid_enumerate(0x0, 0x0);
+				cur_dev = devs;
+				while (cur_dev) {
+					cvarManager->log(string_format("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls",
+						cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number));
+					cvarManager->log("\n");
+					cvarManager->log(string_format("  Manufacturer: %ls\n", cur_dev->manufacturer_string));
+					cvarManager->log(string_format("  Product:      %ls\n", cur_dev->product_string));
+					cvarManager->log("\n");
+					cur_dev = cur_dev->next;
+				}
+				hid_free_enumeration(devs);
+	}
 }

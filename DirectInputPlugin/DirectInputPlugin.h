@@ -22,12 +22,6 @@ Uncomment one of the control schemes or add your own
 #define USE_BAKKESMOD_CONTROLSCHEME
 //#define USE_DEFAULT_CONTROLSCHEME
 
-/* 
-The amount of time (in ms) to sleep between controller readings, lower value = more readings but might impact performance.
-There is probably a minimum threshold since the DS4 controller has a maximum polling rate, but cba looking it up now
-*/
-#define READ_THREAD_SLEEP_INTERVAL 0.1
-
 /*
 Deadzone configuration in bytes (Controller range from 0-256 where 0 is fully to the left, 256 fully to the right)
 Use the painter to get values that fit you
@@ -62,16 +56,32 @@ Reverse deadzones
 #define L2_OUTER_DEADZONE 20
 
 /*
-If false it will block the input reading thread and wait until a new controller state is received from ReadFile. (Recommended to keep true)
+If false it will block the input reading thread and wait until a new controller state is received from ReadFile.
 */
-#define READ_NONBLOCKING false
+#define READ_NONBLOCKING true
+
+/*
+The amount of time (in ms) to sleep between controller readings, lower value = more readings but might impact performance.
+There is probably a minimum threshold since the DS4 controller has a maximum polling rate, but cba looking it up now
+*/
+#define READ_THREAD_SLEEP_INTERVAL 0.1
+
+/*
+DS4 product info
+*/
+
+/*Vendor, always 0x54c I think*/
+#define VENDOR_ID 0x54c
+
+/*The product ID of the hid, might differ depending on which version you have, use hid_list to list all devices and look for Sony to find yours*/
+#define PRODUCT_ID 0x09cc
 
 /*
 Calculations
 */
 
 /*
-Scales 0-256 from -1 to 1
+Scales 0-256 from -1 to 1 with given inner deadzone
 */
 #define SCALE_BYTE(val, minval, maxval, innerdeadzone) (abs(val - 123) < innerdeadzone ? 0.f : 2.f * (val - minval) / (maxval - minval) - 1.f)
 
@@ -88,7 +98,7 @@ Scales 0-256 from -1 to 1
 #define SCALE_L2(val) SCALE_BYTE_SINGLE(val, L2_OUTER_DEADZONE.f, 256-L2_OUTER_DEADZONE, L2_INNER_DEADZONE.f)
 
 /*
-Constants
+DS4 button constants
 */
 #define BUTTON_TRIANGLE (1 << 7)
 #define BUTTON_CIRCLE (1 << 6)
@@ -161,11 +171,18 @@ class DirectInputPlugin : public BakkesMod::Plugin::BakkesModPlugin
 private:
 	bool ds4Connected = false;
 	std::thread inputThread;
-
 public:
 	virtual void onLoad();
 	virtual void onUnload();
+
+	/*Function that is executed after every playermove*/
 	void InputTick(PlayerControllerWrapper cw, void* params, string funcName);
+
+	/*Establishes a connection to a ds4 controller*/
 	void connect_to_ds4();
+
+	/*Disconnects from the ds4 controller*/
 	void disconnect_ds4();
+
+	void OnConsoleCommand(std::vector<std::string> parameters);
 };
