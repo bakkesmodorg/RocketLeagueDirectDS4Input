@@ -1,4 +1,9 @@
 #pragma once
+#define DIRECTINPUT_VERSION 0x0800
+#pragma comment(lib, "dinput8.lib")
+#pragma comment(lib, "dxguid.lib")
+#include <dinput.h>
+
 /*
 Lightweight plugin that reads DS4 controller values directly, skipping all abstraction layers.
 Configuration such as deadzones and multipliers are done at compile time to increase performance.
@@ -9,7 +14,7 @@ Right now, it does not yet block Rocket League from reading the input, so it is 
 #include "bakkesmod/wrappers/PlayerControllerWrapper.h"
 #include <hidapi.h>
 #include <windows.h>
-#pragma comment( lib, "hidapi.lib" )
+
 #pragma comment( lib, "bakkesmod.lib" )
 
 /*
@@ -64,7 +69,7 @@ If false it will block the input reading thread and wait until a new controller 
 The amount of time (in ms) to sleep between controller readings, lower value = more readings but might impact performance.
 There is probably a minimum threshold since the DS4 controller has a maximum polling rate, but cba looking it up now
 */
-#define READ_THREAD_SLEEP_INTERVAL 0.1
+#define READ_THREAD_SLEEP_INTERVAL 1
 
 /*
 DS4 product info
@@ -122,56 +127,20 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 
-#pragma pack(push, 1)
-struct DS4Touch {
-	u32 id : 7;
-	u32 inactive : 1;
-	u32 x : 12;
-	u32 y : 12;
-};
-struct DS4 {
-	u8 prepad;
-	u8 leftx, lefty, rightx, righty;
-	u16 buttons;
-	u8 trackpad_ps : 2;
-	u8 timestamp : 6;
-	u8 l2, r2;
-	u8 pad[2];
-	u8 battery;
-	short accel[3], gyro[3];
-	u8 pad0[35 - 25];
-	DS4Touch touch[2];
-	u8 pad2[64 - 43];
-};
-struct
-	DS4Out { // this is only correct for wired connection. see
-			 // https://github.com/chrippa/ds4drv/blob/master/ds4drv/device.py for
-			 // example for wireless
-	u32 magic; // 0x0004ff05
-	u8 rumbler, rumblel, r, g, b, flashon, flashoff;
-	u8 pad[32 - 11];
-};
-#pragma pack(pop)
-
-struct hid_device_ {
-	HANDLE device_handle;
-	BOOL blocking;
-	USHORT output_report_length;
-	size_t input_report_length;
-	void *last_error_str;
-	DWORD last_error_num;
-	BOOL read_pending;
-	char *read_buf;
-	OVERLAPPED ol;
-};
-
-
+#define SAFE_DELETE(p)  { if(p) { delete (p);     (p)=nullptr; } }
+#define SAFE_RELEASE(p) { if(p) { (p)->Release(); (p)=nullptr; } }
 class DirectInputPlugin : public BakkesMod::Plugin::BakkesModPlugin
 {
 private:
-	bool ds4Connected = false;
+	bool inputDeviceConnected = false;
 	std::thread inputThread;
+
+
 public:
+	HWND hDlg = NULL;
+	IDirectInput8* m_directInput;
+	IDirectInputDevice8* m_inputDevice;
+
 	virtual void onLoad();
 	virtual void onUnload();
 
@@ -183,6 +152,7 @@ public:
 
 	/*Disconnects from the ds4 controller*/
 	void disconnect_ds4();
-
+	BOOL CALLBACK InternalEnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance,
+		VOID* pContext);
 	void OnConsoleCommand(std::vector<std::string> parameters);
 };

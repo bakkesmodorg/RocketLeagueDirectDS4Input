@@ -1,33 +1,32 @@
 #include "DirectInputPlugin.h"
-
+#include <dinputd.h>
 BAKKESMOD_PLUGIN(DirectInputPlugin, "Direct Input plugin", "0.1", 0)
 
 
 
-static DS4 lastInput;
-static int lastResult = 0;
+struct XINPUT_DEVICE_NODE
+{
+	DWORD dwVidPid;
+	XINPUT_DEVICE_NODE* pNext;
+};
 
-hid_device *handle = NULL;
+struct DI_ENUM_CONTEXT
+{
+	DIJOYCONFIG* pPreferredJoyCfg;
+	bool bPreferredJoyCfgValid;
+};
+
+
 bool running = false;
 
 void read_inputs()
 {
-	DWORD bytes_read = 0;
-	OVERLAPPED overlapped;
-	memset(&overlapped, 0, sizeof(overlapped));
-	overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	hid_set_nonblocking(handle, READ_NONBLOCKING);
-	while (running)
-	{
-		ResetEvent(overlapped.hEvent);
-		if (handle) {
-			lastResult = hid_read(handle, (u8*)&lastInput, 64);
-		}
-		Sleep(READ_THREAD_SLEEP_INTERVAL);
-	}
+
 }
+DirectInputPlugin* pluginInstance = NULL;
 void DirectInputPlugin::onLoad()
 {
+	pluginInstance = this;
 	cvarManager->registerNotifier("hid_list", std::bind(&DirectInputPlugin::OnConsoleCommand, this, std::placeholders::_1), "Lists all currently connected HIDs", PERMISSION_ALL);
 	gameWrapper->HookEventWithCallerPost<PlayerControllerWrapper>("Function TAGame.PlayerController_TA.PlayerMove", 
 		bind(&DirectInputPlugin::InputTick, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -42,61 +41,183 @@ void DirectInputPlugin::onUnload()
 
 void DirectInputPlugin::InputTick(PlayerControllerWrapper cw, void * params, string funcName)
 {
-	if (!handle)
+	HRESULT hr;
+	TCHAR strText[512] = { 0 }; // Device state text
+	DIJOYSTATE2 js;           // DInput joystick state 
+
+	if (!m_inputDevice)
 		return;
-	ControllerInput input = cw.GetVehicleInput();
-#ifdef USE_BAKKESMOD_CONTROLSCHEME
-	input.Steer = SCALE_LEFTSTICK(lastInput.leftx);
-	input.Yaw = SCALE_LEFTSTICK(lastInput.leftx);
-	input.Pitch = SCALE_LEFTSTICK(lastInput.lefty);
-	input.Throttle = SCALE_R2(lastInput.r2) - SCALE_L2(lastInput.l2);
-	input.Roll = BUTTON_R1_PRESSED(lastInput.buttons) ? 1 : 0;
-	input.Roll -= BUTTON_L1_PRESSED(lastInput.buttons) ? 1 : 0;
 
-	cw.SetVehicleInput(input);
-	cw.ToggleJump(BUTTON_CROSS_PRESSED(lastInput.buttons));
-	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons));
-	cw.ToggleBoost(BUTTON_CIRCLE_PRESSED(lastInput.buttons));
-#elif defined(USE_DEFAULT_CONTROLSCHEME)
-	input.Throttle = SCALE_R2(lastInput.r2) - SCALE_L2(lastInput.l2);
-	input.Steer = SCALE_LEFTSTICK(lastInput.leftx);
-	input.Pitch = SCALE_LEFTSTICK(lastInput.lefty);
+	// Poll the device to read the current state
+	hr = m_inputDevice->Poll();
+	if (FAILED(hr))
+	{
+		// DInput is telling us that the input stream has been
+		// interrupted. We aren't tracking any state between polls, so
+		// we don't have any special reset that needs to be done. We
+		// just re-acquire and try again.
+		hr = m_inputDevice->Acquire();
+		while (hr == DIERR_INPUTLOST)
+			hr = m_inputDevice->Acquire();
 
-	//Use ternary since we actually need to reset to 0 if button not pressed
-	bool airRolling = BUTTON_SQUARE_PRESSED(lastInput.buttons);
-	input.Yaw = airRolling ? 0 : SCALE_LEFTSTICK(lastInput.leftx);
-	input.Roll = airRolling ? SCALE_LEFTSTICK(lastInput.leftx) : 0;
-
-
-	cw.SetVehicleInput(input);
-	cw.ToggleJump(BUTTON_CROSS_PRESSED(lastInput.buttons));
-	cw.ToggleHandbrake(BUTTON_L1_PRESSED(lastInput.buttons));
-	cw.ToggleBoost(BUTTON_CIRCLE_PRESSED(lastInput.buttons));
-#endif
-}
-
-void DirectInputPlugin::connect_to_ds4()
-{
-	if (!(handle = hid_open(VENDOR_ID, PRODUCT_ID, NULL))) {//0x5c4
-		cvarManager->log("Unable to connect to controller");
-		hid_exit();
+		// hr may be DIERR_OTHERAPPHASPRIO or other errors.  This
+		// may occur when the app is minimized or in the process of 
+		// switching, so just try again later 
 		return;
 	}
 
-	running = true;
-	DS4Out ds4_out = { 0x0004ff05, 0, 0, 255, 0, 185 }; //Make bar pink to indicate we have a connection
-	int res = hid_write(handle, (u8 *)&ds4_out, sizeof(ds4_out));
-	inputThread = std::thread(read_inputs);
+	// Get the input's device state
+	if (FAILED(hr = m_inputDevice->GetDeviceState(sizeof(DIJOYSTATE2), &js)))
+		return;
+
+	cvarManager->log("input test: " + std::to_string(js.lX));
+}
+
+BOOL CALLBACK EnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance,
+	VOID* pContext)
+{
+	return pluginInstance->InternalEnumJoysticksCallback(pdidInstance, pContext);
+}
+
+BOOL CALLBACK EnumObjectsCallback(const DIDEVICEOBJECTINSTANCE* pdidoi,
+	VOID* pContext)
+{
+	HWND hDlg = (HWND)pContext;
+
+	static int nSliderCount = 0;  // Number of returned slider controls
+	static int nPOVCount = 0;     // Number of returned POV controls
+
+	// For axes that are returned, set the DIPROP_RANGE property for the
+	// enumerated axis in order to scale min/max values.
+	if (pdidoi->dwType & DIDFT_AXIS)
+	{
+		DIPROPRANGE diprg;
+		diprg.diph.dwSize = sizeof(DIPROPRANGE);
+		diprg.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+		diprg.diph.dwHow = DIPH_BYID;
+		diprg.diph.dwObj = pdidoi->dwType; // Specify the enumerated axis
+		diprg.lMin = -1000;
+		diprg.lMax = +1000;
+
+		// Set the range for the axis
+		if (FAILED(pluginInstance->m_inputDevice->SetProperty(DIPROP_RANGE, &diprg.diph)))
+			return DIENUM_STOP;
+
+	}
+
+	return DIENUM_CONTINUE;
+}
+
+BOOL CALLBACK DirectInputPlugin::InternalEnumJoysticksCallback(const DIDEVICEINSTANCE* pdidInstance,
+	VOID* pContext)
+{
+	auto pEnumContext = reinterpret_cast<DI_ENUM_CONTEXT*>(pContext);
+	HRESULT hr;
+
+	// Skip anything other than the perferred joystick device as defined by the control panel.  
+	// Instead you could store all the enumerated joysticks and let the user pick.
+	if (pdidInstance->guidInstance.Data1 == 164365644L || pdidInstance->guidInstance.Data1 == 170061648L) //Filter out @bakkes wireless controller
+	{
+		cvarManager->log("Skipping input device " + std::to_string(pdidInstance->guidInstance.Data1));
+		//SAFE_RELEASE(m_inputDevice);
+		return DIENUM_CONTINUE;
+	}
+	cvarManager->log("Received device " + to_string(pdidInstance->guidInstance.Data1));
+	/*if (pEnumContext->bPreferredJoyCfgValid &&
+		!IsEqualGUID(pdidInstance->guidInstance, pEnumContext->pPreferredJoyCfg->guidInstance))
+		return DIENUM_CONTINUE;*/
+
+	// Obtain an interface to the enumerated joystick.
+	hr = m_directInput->CreateDevice(pdidInstance->guidInstance, &m_inputDevice, nullptr);
+
+	// If it failed, then we can't use this joystick. (Maybe the user unplugged
+	// it while we were in the middle of enumerating it.)
+	if (FAILED(hr))
+		return DIENUM_CONTINUE;
+	DIDEVICEINSTANCE deviceInst;
+	deviceInst.dwSize = sizeof(DIDEVICEINSTANCE);
+	m_inputDevice->GetDeviceInfo(&deviceInst);
+
+	cvarManager->log("Found input device: " + std::string(deviceInst.tszProductName) + " - " + 
+		std::to_string(deviceInst.guidProduct.Data1) + "-" + std::to_string(deviceInst.guidProduct.Data2) + "-" + 
+		std::to_string(deviceInst.guidProduct.Data3) + "-" + std::string((char*)deviceInst.guidProduct.Data4));
+	
+	
+
+	// Stop enumeration. Note: we're just taking the first joystick we get. You
+	// could store all the enumerated joysticks and let the user pick.
+	return DIENUM_STOP;
+}
+
+
+void DirectInputPlugin::connect_to_ds4()
+{
+	HRESULT result;
+	result = DirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8, (void**)&m_directInput, NULL);
+	if (FAILED(result))
+	{
+		cvarManager->log("Could not initialize direct input");
+		return;
+	}
+	DIJOYCONFIG PreferredJoyCfg = { 0 };
+	DI_ENUM_CONTEXT enumContext;
+	enumContext.pPreferredJoyCfg = &PreferredJoyCfg;
+	enumContext.bPreferredJoyCfgValid = false;
+
+	IDirectInputJoyConfig8* pJoyConfig = nullptr;
+	if (FAILED(result = m_directInput->QueryInterface(IID_IDirectInputJoyConfig8, (void**)&pJoyConfig))) {
+		cvarManager->log("Could not initialize direct input (2)");
+		return;
+	}
+
+
+	PreferredJoyCfg.dwSize = sizeof(PreferredJoyCfg);
+	if (SUCCEEDED(pJoyConfig->GetConfig(0, &PreferredJoyCfg, DIJC_GUIDINSTANCE))) // This function is expected to fail if no joystick is attached
+		enumContext.bPreferredJoyCfgValid = true;
+	SAFE_RELEASE(pJoyConfig);
+	result = m_directInput->EnumDevices(DI8DEVCLASS_GAMECTRL,
+		EnumJoysticksCallback,
+		&enumContext, DIEDFL_ATTACHEDONLY);
+	// Look for a simple joystick we can use for this sample program.
+	if (FAILED(result) || m_inputDevice == NULL)
+	{
+		cvarManager->log("No suitable input devices found");
+		return;
+	}
+
+
+	if (FAILED(result = m_inputDevice->SetDataFormat(&c_dfDIJoystick2)))
+	{
+		cvarManager->log("Something wrong with input device stuff (1)");
+		return;
+	}
+
+	hDlg = GetActiveWindow();
+
+	// Set the cooperative level to let DInput know how this device should
+	// interact with the system and with other DInput applications.
+	if (FAILED(result = m_inputDevice->SetCooperativeLevel(hDlg, DISCL_EXCLUSIVE |
+		DISCL_FOREGROUND)))
+	{
+		cvarManager->log("Something wrong with input device stuff (2)");
+		return;
+	}
+
+	// Enumerate the joystick objects. The callback function enabled user
+	// interface elements for objects that are found, and sets the min/max
+	// values property for discovered axes.
+	if (FAILED(result = m_inputDevice->EnumObjects(EnumObjectsCallback,
+		(VOID*)hDlg, DIDFT_ALL)))
+	{
+		cvarManager->log("Something wrong with input device stuff (3)");
+		return;
+	}
+
 }
 
 void DirectInputPlugin::disconnect_ds4()
 {
-	running = false;
-	inputThread.join();
-	if (!handle)
-		return;
-	hid_close(handle);
-	hid_exit();
+
 }
 
 
@@ -120,22 +241,5 @@ std::string string_format(const std::string fmt_str, ...) {
 
 void DirectInputPlugin::OnConsoleCommand(std::vector<std::string> parameters)
 {
-	if (parameters.at(0).compare("hid_init") == 0)
-	{
-				int res = hid_init();
-				struct hid_device_info *devs, *cur_dev;
-		
-				devs = hid_enumerate(0x0, 0x0);
-				cur_dev = devs;
-				while (cur_dev) {
-					cvarManager->log(string_format("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls",
-						cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number));
-					cvarManager->log("\n");
-					cvarManager->log(string_format("  Manufacturer: %ls\n", cur_dev->manufacturer_string));
-					cvarManager->log(string_format("  Product:      %ls\n", cur_dev->product_string));
-					cvarManager->log("\n");
-					cur_dev = cur_dev->next;
-				}
-				hid_free_enumeration(devs);
-	}
+	
 }
